@@ -1,11 +1,97 @@
-/// Calender ID
-var calendarId = 'xyx.com_3s0i991ci723fnu35ltu6icjdo@group.calendar.google.com';  /// this needs to be changed by you
-var record_key_project = "Project:"
-var record_template_project = "P1"
-var record_key_workpackage = "Package:"
-var record_template_workpackage = ["WP1", "WP2"]
-var record_key_title = "Records:"
-var max_header_columns = 30;
+/**
+ * TimeSheet
+ * @url https://github.com/mx-robotics/timesheet
+ * @brief This script extracts calendar entries to generate a time sheet
+ * @installation
+ *  - create a new sheet
+ *  - under "Tools" -> "Script Editor" copy and pased this stript
+ *  - get your calendarId: check your calendar properties and serarch your for your calendar id and past it into the config sheet.
+ *  - close and reopen the new sheet you will be asked for access rights which you have to give.
+ *  - have fun
+ **/
+
+function date_next_recort(){
+  ss = SpreadsheetApp.getActiveSpreadsheet();
+  sheet = ss.getActiveSheet();
+  var timezone = ss.getSpreadsheetTimeZone();
+  var date = new Date(sheet.getRange("B1").getValue());
+  var record_next = new Date(date);
+  var month = record_next.getMonth();
+  record_next.setMonth(month + 1);
+  Logger.log("ScriptTimeZone: " + Session.getScriptTimeZone());
+  Logger.log("SheetTimeZone:  " + ss.getSpreadsheetTimeZone()); 
+  Logger.log('record_start: ' + Utilities.formatDate(date, timezone, 'MMMM dd, yyyy'));
+  Logger.log('record_next:  ' + Utilities.formatDate(record_next, timezone, 'MMMM dd, yyyy'));
+  return record_next;
+}
+
+// Some global variables
+var calendarId;
+var project_prefix;
+var sheet_cell_date;
+var sheet_row_first_day;
+var sheet_col_day;
+var sheet_row_workpackages;
+var sheet_col_first_workpackages;
+var sheet_col_last_workpackages;
+
+/**
+ * Reads a Value by a key form a 2D list
+ * @param cells list
+ * @param variable_name
+ */
+function getValueByKeyFromList2D(list2D, variable_name){
+  for (var r = 0; r < list2D.length; r++){
+    var key = list2D[r][0];
+    if (key == variable_name){
+      var value = list2D[r][1];
+      return value;
+    }
+  }
+  Browser.msgBox("Config \nVariable: \'" + variable_name + "\' not found");
+  exit();
+}
+
+/**
+ * updates all config variables
+ */
+function updateConfig(){
+  sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Config');
+  var list2D = sheet.getRange(4,1,30,2 ).getValues()
+  calendarId = getValueByKeyFromList2D(list2D,'calendarId');
+  project_prefix = getValueByKeyFromList2D(list2D,'project_prefix');
+  sheet_cell_date = getValueByKeyFromList2D(list2D,'sheet_cell_date');
+  sheet_row_first_day = getValueByKeyFromList2D(list2D,'sheet_row_first_day');
+  sheet_col_days = getValueByKeyFromList2D(list2D,'sheet_col_days');
+  sheet_row_workpackages = getValueByKeyFromList2D(list2D,'sheet_row_workpackages');
+  sheet_col_first_workpackages =getValueByKeyFromList2D(list2D,'sheet_col_first_workpackages');
+  sheet_col_last_workpackages = getValueByKeyFromList2D(list2D,'sheet_col_last_workpackages');
+  sheet_wkp_name_error = getValueByKeyFromList2D(list2D,'sheet_wkp_name_error');
+  sheet_wkp_name_note = getValueByKeyFromList2D(list2D,'sheet_wkp_name_note');
+  sheet_wkp_name_description = getValueByKeyFromList2D(list2D,'sheet_wkp_name_description');
+}
+
+/**
+ * Helper to check if a fild holds a date variable
+ **/
+function isValidDate(d) {
+  if ( Object.prototype.toString.call(d) !== "[object Date]" )
+    return false;
+  return true;
+}
+
+/**
+ * Foramts time
+ **/
+function msToTime(s) {
+  var ms = s % 1000;
+  s = (s - ms) / 1000;
+  var secs = s % 60;
+  s = (s - secs) / 60;
+  var mins = s % 60;
+  var hrs = (s - mins) / 60;;
+  return hrs + ':' + Utilities.formatString("%02d", mins); // milliSecs are not shown but you can use ms if needed
+}
 
 
 /**
@@ -13,13 +99,12 @@ var max_header_columns = 30;
  * @param {Event} event The open event.
  */
 function onOpen(event) {
+  updateConfig()
   SpreadsheetApp.getUi()
       .createMenu('TimeSheet')
-      .addItem('update', 'updateTimesheet')
-      .addItem('create template', 'createTemplate')
-      .addSeparator()
-      .addSubMenu(SpreadsheetApp.getUi().createMenu('Settings')
-          .addItem('create template', 'createTemplate'))
+      .addItem('update Config', 'updateConfig')
+      .addItem('update Current Row', 'updateCurrentRow')
+      .addItem('update Current Sheet', 'updateCurrentSheet')
       .addToUi();
 }
 
@@ -32,154 +117,146 @@ function onInstall(event) {
 }
 
 /**
- * Foramts time
- **/
-function msToTime(s) {
-  var ms = s % 1000;
-  s = (s - ms) / 1000;
-  var secs = s % 60;
-  s = (s - secs) / 60;
-  var mins = s % 60;
-  var hrs = (s - mins) / 60;
-  //return hrs + ':' + mins + ':' + secs; // milliSecs are not shown but you can use ms if needed
-  return hrs + mins/60;
-}
-
-
-
-/**
- * creates the timplate sheet
- * @post update
- **/
-function createTemplate() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getActiveSheet();
-  sheet.setColumnWidths(1, 5, 120);
-  sheet.clear();
-  var cell_title = sheet.getRange("C1");
-  cell_title.setValue("Time Sheet")
-  cell_title.setFontSize(20);
-  cell_title.setHorizontalAlignment("center");
-  var range_date = sheet.getRange("B2:D2");
-  range_date.setValues([[new Date("8/19/2019"), "->", new Date("9/30/2019")]]);
-  range_date.setHorizontalAlignment("center");
-  var range_project = sheet.getRange(4,1,1,5);
-  range_project.setValues([[record_key_project, record_template_project, "", "60", ""]]); 
-  range_project.setBorder(true, true, true, true, false, false, "black", SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
-  
-  var costs = sheet.getRange("E4");
-  costs.setFormulaR1C1("=R[0]C[-1]*R[0]C[-2]").setNumberFormat("#,##0.00\ [$€-1]");
-  var costs_per_hour = sheet.getRange("D4");
-  costs_per_hour.setNumberFormat("#,##0\ [$€/h-1]");
-  
-  var range_wp = sheet.getRange(6,1,1,5);
-  range_wp.setValues([[record_key_workpackage, record_template_workpackage[0], "", "60", ""]]); 
-  var cell_package_costs = sheet.getRange("E6");
-  var costs_per_hour = sheet.getRange("D6");
-  costs_per_hour.setNumberFormat("#,##0\ [$€/h-1]");
-  range_wp.setBorder(true, true, true, true, false, false, "black", SpreadsheetApp.BorderStyle.SOLID);
-  var range_wp = sheet.getRange(7,1,1,5);
-  cell_package_costs.setFormulaR1C1("=R[0]C[-1]*R[0]C[-2]").setNumberFormat("#,##0.00\ [$€-1]"); 
-  range_wp.setValues([[record_key_workpackage, record_template_workpackage[1], "", "60", ""]])
-  var cell_package_costs = sheet.getRange("E7");
-  cell_package_costs.setFormulaR1C1("=R[0]C[-1]*R[0]C[-2]").setNumberFormat("#,##0.00\ [$€-1]");
-  var costs_per_hour = sheet.getRange("D7");
-  costs_per_hour.setNumberFormat("#,##0\ [$€/h-1]");
-  range_wp.setBorder(true, true, true, true, false, false, "black", SpreadsheetApp.BorderStyle.SOLID);
-  var range_recording_titel = sheet.getRange(10,1);
-  range_recording_titel.setValue(record_key_title)
-  
-  var range_recording_header = sheet.getRange(11,1,1,5);
-  range_recording_header.setHorizontalAlignment("left");
-  sheet.getRange(11, 5).setHorizontalAlignment("right");
-  range_recording_header.setBackgroundRGB(224, 224, 224);
-  range_recording_header.setValues([["Start", "Details", "", "", "Hours"]])
-  sheet.getRange(11, 2, 1, 3).mergeAcross();
-  range_recording_header.setBorder(true, true, true, true, true, false, "black", SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
-}
-
-/**
- * update the timesheet
+ * Returns a list with all workpackage entries and the realted columns  
+ * @param sheet 
+ * @return list with [workpackage, column]
  */
-function updateTimesheet() {
-  
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getActiveSheet();
-  var calendar = CalendarApp.getCalendarById(calendarId)
-  var record_start = new Date(sheet.getRange("B2").getValue());
-  var record_end = new Date(sheet.getRange("D2").getValue())
-  record_end = new Date(record_end.getTime() + 24 * 60 * 60 * 1000);
-  var record_project = "x";
-  var record_project_range_sum;
-  for ( i = 1; i < max_header_columns; i++){
-    var key = sheet.getRange(i,1).getValue();
-    if(key == record_key_project){
-      record_project  = sheet.getRange(i,2).getValue();
-      record_project_range_sum  = sheet.getRange(i,3);
-      break;
+function getWorkpackages(sheet) {
+  var wkps = [];
+  for(var c = 1; c <= sheet_col_last_workpackages; c++){
+    if(sheet.getRange(sheet_row_workpackages,c).isBlank()){
+      continue;
+    }    
+    workpkg = sheet.getRange(sheet_row_workpackages,c).getValue();
+    wkps.push([workpkg, c])
+    if(workpkg.toLowerCase() == sheet_wkp_name_error.toLowerCase()){
+      return wkps;
     }
   }
-  var record_pkgs = {};
-  var record_pkgs_range_sum = {};
-  for (i = 1; i < max_header_columns; i++){
-    var key = sheet.getRange(i,1).getValue();
-    if(key == record_key_workpackage){
-      var pgk_name  = sheet.getRange(i,2).getValue();
-      record_pkgs[pgk_name] = 0;
-      record_pkgs_range_sum[pgk_name] = sheet.getRange(i,3)
+  throw new Error("the last workpackage must be the error package")
+
+}
+/**
+ * Returns the column index with the description
+ * @return column idx 
+ */
+function getColDescription(sheet) {
+  for(var c = 1; c <= sheet_col_last_workpackages; c++){
+    if(sheet.getRange(sheet_row_workpackages,c).isBlank()){
+      continue;
+    }    
+    workpkg = sheet.getRange(sheet_row_workpackages,c).getValue();
+    if(workpkg.toLowerCase() == sheet_wkp_name_description.toLowerCase()){
+      return c;
     }
   }
-  var record_details_idx
-  for (i = 1; i < max_header_columns; i++){
-    var key = sheet.getRange(i,1).getValue();
-    if(key == record_key_title){
-      record_details_idx = i + 2;
-      break;
-    }
+  throw new Error("No description title in workpackage row")
+}
+
+/**
+ * Returns the date of a row
+ * @return date 
+ */
+function getDateFromRow(sheet, row){
+  sheet.getRange(row,1).setBackground("red");
+  var range_date = sheet.getRange(row,sheet_col_days);
+  if( !isValidDate(range_date.getValue()) ) {
+    Browser.msgBox('Could not read the date off row ' + row);
+    throw new Error("date not readable")
   }
-  
-  Logger.log(record_project)
-  Logger.log(record_pkgs)
-  var record_search = "#" + record_project;
-  var events = calendar.getEvents(record_start, record_end,{search: record_search});
-  var total_duration = 0;
-  if (events.length > 0) {
+  var date = new Date(range_date.getValue());
+  return date;
+}
+
+/**
+ * updates the work package durations on a spezific row
+ * @return sheet 
+ * @return workpkgs 
+ * @return row 
+ * @return col_des 
+ */
+function updateRow(sheet, workpkgs, row, col_des){
+  var date = getDateFromRow(sheet, row)  
+  var record_search = "#" + project_prefix;
+  calendar = CalendarApp.getCalendarById(calendarId);
+  var end_date = new Date(date);
+  end_date.setDate(end_date.getDate() + 1)
+  var events = calendar.getEvents(date, end_date, {search: record_search});
+  var description = String();
+  var duration_error = 0;
+  for (i = 0; i < events.length; i++) {
+    event = events[i];   
+    duration_error = duration_error + (event.getEndTime() - event.getStartTime());
+  }
+  var duration_wkp = [];
+  for(j = 0; j < workpkgs.length; j++){
+    duration_wkp.push(0)
+    var wkp = workpkgs[j][0];
+    var wkp_search = "#" + project_prefix + ":" + wkp;
     for (i = 0; i < events.length; i++) {
-      var event = events[i];
-      var title = event.getTitle();      
-      var start = event.getStartTime() ;
-      var end = event.getEndTime();
-      start = new Date(start);
-      end = new Date(end);
-      var duration = end - start;
-      var title_cuted = title.replace(record_search, '')
-      for(var k in record_pkgs){
-        if(title.indexOf(record_search + ":" + k) > -1) {
-          record_pkgs[k] = record_pkgs[k] + duration;
-          title_cuted = title_cuted.replace(":" + k, k+ " -")
+      event = events[i];
+      var title = event.getTitle(); 
+      var idx = title.toLowerCase().includes(wkp_search.toLowerCase())
+      if(idx > 0 ){
+        var duration = event.getEndTime() - event.getStartTime()
+        duration_wkp[j] = duration_wkp[j] + duration;
+        duration_error = duration_error - duration
+        var title_cuted = title.replace(wkp_search, '').trim();
+        if(title_cuted.length > 1){
+          /// push descriptions to check for double entries
+          title_cuted = wkp + ": " + title_cuted;
+          if(description.length == 0){          
+            description = title_cuted;
+          }else {
+            description = description + ", " + title_cuted;
+          }
         }
       }
-      var splitEventId = event.getId().split('@');
-      var eventURL = "https://www.google.com/calendar/event?eid=" + Utilities.base64Encode(splitEventId[0] + " " + calendarId);
-      title_cuted = "=HYPERLINK(\""+ eventURL + "\";\"" + title_cuted + "\")";
-      total_duration = total_duration + duration
-      var range_event = sheet.getRange(record_details_idx+i, 1, 1, 5);
-      sheet.getRange(record_details_idx+i, 5).setHorizontalAlignment("right");
-      range_event.setValues([[start, title_cuted, " ", " ", msToTime(duration)]]) 
-      sheet.getRange(record_details_idx+i,1).setNumberFormat("yyyy-MM-dd hh:mm");
-      sheet.getRange(record_details_idx+i,5).setNumberFormat("0.00");
-      sheet.getRange(record_details_idx+i, 2, 1, 3).mergeAcross();
-      range_event.setBorder(true, true, true, true, true, false, "black", SpreadsheetApp.BorderStyle.SOLID);
-      
-      if(i % 2 != 0){
-        range_event.setBackgroundRGB(248, 248, 248);
-      }
     }
-    record_project_range_sum.setValue(msToTime(total_duration))
-    record_project_range_sum.setNumberFormat("#,##0.00\ [$h-1]");
-    for(var k in record_pkgs_range_sum){
-      record_pkgs_range_sum[k].setValue(msToTime(record_pkgs[k]))
-      record_pkgs_range_sum[k].setNumberFormat("#,##0.00\ [$h-1]");
+    if(wkp.toLowerCase() == sheet_wkp_name_error.toLowerCase()){
+      duration_wkp[j] = duration_error
+    }    
+  }
+  for(j = 0; j < workpkgs.length; j++){
+    if(duration_wkp[j] == 0) duration_wkp[j] = '';
+    else duration_wkp[j] = msToTime(duration_wkp[j]);
+  }
+  range = sheet.getRange(row,workpkgs[0][1], 1, workpkgs[workpkgs.length-1][1] - workpkgs[0][1] + 1);
+  range.setValues([duration_wkp])
+  range = sheet.getRange(row, col_des).setValue(description)
+  //Logger.log(duration_wkp)
+  sheet.getRange(row,1).setBackground("white");
+}
+
+/**
+ * updates the current row
+ */
+function updateCurrentRow(){
+  updateConfig();
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  workpkgs = getWorkpackages(sheet);
+  col_des = getColDescription(sheet);
+  var active_row_idx = sheet.getActiveRange().getRowIndex();
+  updateRow(sheet, workpkgs, active_row_idx, col_des);
+}
+
+/**
+ * updates the current sheet
+ */
+function updateCurrentSheet(){
+  updateConfig();
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  workpkgs = getWorkpackages(sheet);
+  col_des = getColDescription(sheet);
+  var row = sheet_row_first_day;
+  var loop = true;
+  while(loop){
+    var range_date = sheet.getRange(row,sheet_col_days);
+    if( isValidDate(range_date.getValue()) ) {
+      updateRow(sheet, workpkgs, row++, col_des);
+    } else {
+      loop = false;
     }
+
   }
 }
