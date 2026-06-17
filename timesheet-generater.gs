@@ -1,6 +1,5 @@
 /**
  * TimeSheet
- * @url https://github.com/mx-robotics/timesheet
  * @brief This script extracts calendar entries to generate a time sheet
  * @installation
  *  - create a new sheet
